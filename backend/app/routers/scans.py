@@ -12,6 +12,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.models import ExtractedField, Product, Scan, User, Violation
@@ -199,6 +200,52 @@ def get_scan(scan_id: uuid.UUID, db: Session = Depends(get_db)):
         ],
         "annotated_image_url": scan.processed_image_url,
     }
+
+
+@router.get("/{scan_id}/image")
+def get_scan_image(
+    scan_id: uuid.UUID,
+    annotated: bool = True,
+    db: Session = Depends(get_db),
+):
+    """Return the scanned label image, optionally with violation bounding
+    boxes drawn on it. Falls back to the raw image if annotation fails."""
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if not scan or not scan.raw_image_url:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scan image not found")
+
+    raw = storage.get_file(scan.raw_image_url)
+    if not raw:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "Image data unavailable"
+        )
+
+    if not annotated:
+        return Response(content=raw, media_type="image/jpeg")
+
+    try:
+        import cv2
+        import numpy as np
+
+        from app.services.report_generator import ReportGenerator
+
+        violations = (
+            db.query(Violation).filter(Violation.scan_id == scan.id).all()
+        )
+        if not any(v.evidence_bbox for v in violations):
+            return Response(content=raw, media_type="image/jpeg")
+
+        arr = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+        drawn = ReportGenerator().annotate_image(arr, violations, None)
+        ok, buf = cv2.imencode(".jpg", drawn)
+        if ok:
+            return Response(
+                content=buf.tobytes(), media_type="image/jpeg"
+            )
+    except Exception:
+        logger.exception("Annotation failed for scan %s", scan_id)
+
+    return Response(content=raw, media_type="image/jpeg")
 
 
 @router.get("")

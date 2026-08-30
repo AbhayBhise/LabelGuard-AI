@@ -59,6 +59,27 @@ def violations_by_rule(
     ]
 
 
+@router.get("/violations-over-time")
+def violations_over_time(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("analytics:read")),
+):
+    """Daily violation counts over the trailing `days` window (real data)."""
+    since = datetime.utcnow() - timedelta(days=max(1, days))
+    day = func.date(Violation.created_at)
+    rows = (
+        db.query(day.label("date"), func.count(Violation.id).label("count"))
+        .filter(Violation.created_at >= since)
+        .group_by(day)
+        .order_by(day)
+        .all()
+    )
+    return [
+        {"date": str(r.date), "violations": int(r.count)} for r in rows
+    ]
+
+
 @router.get("/brand-compliance")
 def brand_compliance(
     from_: datetime = None,

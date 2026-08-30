@@ -118,19 +118,6 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Sign in"}
           </button>
 
-          <div className="my-4 flex items-center gap-3 text-xs text-slate-400">
-            <div className="h-px flex-1 bg-slate-200" />
-            or
-            <div className="h-px flex-1 bg-slate-200" />
-          </div>
-
-          <button
-            type="button"
-            className="w-full rounded-md border border-slate-300 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Login with Google
-          </button>
-
           <p className="mt-4 text-center text-xs text-slate-400">
             Demo: officer@labelguard.in / officer123
           </p>

@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.db.models import User
 from app.db.session import get_db
 from app.models.schemas import (
-    GoogleLoginRequest,
     LoginRequest,
     RefreshRequest,
     Token,
@@ -17,6 +16,7 @@ from app.utils.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    revoke_jti,
     verify_password,
 )
 
@@ -47,25 +47,6 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     return _token_response(user)
 
 
-@router.post("/google", response_model=Token)
-def google_login(body: GoogleLoginRequest, db: Session = Depends(get_db)):
-    # TODO: verify Google ID token against GOOGLE_CLIENT_ID via google auth lib
-    payload = decode_token(body.google_id_token) if body.google_id_token else None
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Google token",
-        )
-    email = payload.get("email")
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No account linked to this Google email",
-        )
-    return _token_response(user)
-
-
 @router.post("/refresh", response_model=Token)
 def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
     payload = decode_token(body.refresh_token)
@@ -89,8 +70,11 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/logout")
-def logout():
-    # TODO: invalidate refresh token in Redis/deny-list
+def logout(body: RefreshRequest):
+    """Revoke the presented refresh token so it can no longer be exchanged."""
+    payload = decode_token(body.refresh_token)
+    if payload and payload.get("jti"):
+        revoke_jti(payload["jti"])
     return {"detail": "Logged out"}
 
 

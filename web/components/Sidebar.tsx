@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: "▦" },
@@ -14,6 +14,31 @@ const nav = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function logout() {
+    const base =
+      process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/v1";
+    const refresh =
+      typeof window !== "undefined"
+        ? localStorage.getItem("refresh_token")
+        : null;
+    try {
+      if (refresh) {
+        await fetch(`${base}/auth/logout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refresh }),
+        });
+      }
+    } catch {
+      /* revoke is best-effort; clear the session regardless */
+    }
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    router.push("/login");
+  }
+
   return (
     <aside className="flex h-full w-60 flex-col border-r border-slate-200 bg-white">
       <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
@@ -51,7 +76,7 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-slate-100 p-4">
+      <div className="space-y-3 border-t border-slate-100 p-4">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold">
             OK
@@ -63,6 +88,12 @@ export default function Sidebar() {
             <div className="text-[10px] text-slate-400">OFFICER</div>
           </div>
         </div>
+        <button
+          onClick={logout}
+          className="w-full rounded-md border border-slate-200 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Sign out
+        </button>
       </div>
     </aside>
   );

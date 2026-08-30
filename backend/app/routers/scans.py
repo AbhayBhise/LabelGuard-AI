@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import (
@@ -145,13 +146,51 @@ def create_scan(
     return {"scan_id": str(scan.id), "status": "processing", "estimated_seconds": 8}
 
 
+#: Ordered pipeline stages surfaced to the client while a scan is processing.
+PIPELINE_STAGES = [
+    "Image preprocessing",
+    "Label region detection",
+    "Text extraction (OCR)",
+    "Semantic field extraction (AI)",
+    "Compliance rule checking",
+    "Report generation",
+]
+
+# Rough seconds a scan takes end to end; used to interpolate progress when we
+# have no finer signal than "still processing".
+_ESTIMATED_SECONDS = 8
+
+
 @router.get("/{scan_id}/status", response_model=ScanStatus)
 def get_status(scan_id: uuid.UUID, db: Session = Depends(get_db)):
     scan = db.query(Scan).filter(Scan.id == scan_id).first()
     if not scan:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scan not found")
-    progress = 100 if scan.status == "complete" else (50 if scan.status == "failed" else 30)
-    return ScanStatus(scan_id=scan.id, status=scan.status, progress=progress)
+
+    if scan.status == "complete":
+        return ScanStatus(scan_id=scan.id, status="complete", progress=100)
+    if scan.status == "failed":
+        return ScanStatus(scan_id=scan.id, status="failed", progress=100)
+
+    # Still processing: fields land near the end of the pipeline, so their
+    # presence is a real signal; otherwise interpolate from elapsed time.
+    fields_done = (
+        db.query(ExtractedField)
+        .filter(ExtractedField.scan_id == scan.id)
+        .count()
+        > 0
+    )
+    if fields_done:
+        progress = 90
+    else:
+        started = scan.scanned_at or datetime.now(timezone.utc)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        progress = max(
+            10, min(80, int((elapsed / _ESTIMATED_SECONDS) * 80))
+        )
+    return ScanStatus(scan_id=scan.id, status="processing", progress=progress)
 
 
 @router.get("/{scan_id}")

@@ -31,6 +31,7 @@ export default function NewScanPage() {
   async function handleUpload() {
     if (!file) return;
     setUploading(true);
+    setProgress(5);
     const form = new FormData();
     form.append("images", file);
     if (productName) form.append("product_name", productName);
@@ -39,33 +40,43 @@ export default function NewScanPage() {
     form.append("source", "web");
 
     const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/v1";
+    const auth = `Bearer ${
+      typeof window !== "undefined"
+        ? localStorage.getItem("access_token") || ""
+        : ""
+    }`;
+
     try {
       const res = await fetch(`${base}/scans`, {
         method: "POST",
         body: form,
-        headers: {
-          Authorization: `Bearer ${
-            typeof window !== "undefined"
-              ? localStorage.getItem("access_token") || ""
-              : ""
-          }`,
-        },
+        headers: { Authorization: auth },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Upload failed");
 
-      // Animate processing steps then navigate to result
-      const total = 5500;
-      const interval = setInterval(() => {
-        setProgress((p) => {
-          const next = Math.min(p + 4, 100);
-          if (next >= 100) {
-            clearInterval(interval);
-            setTimeout(() => router.push(`/scan/${data.scan_id}`), 400);
+      // Poll the real pipeline status and only navigate once it finishes.
+      const poll = async () => {
+        try {
+          const s = await fetch(`${base}/scans/${data.scan_id}/status`, {
+            headers: { Authorization: auth },
+          }).then((r) => r.json());
+          setProgress(s.progress ?? 10);
+          if (s.status === "complete") {
+            router.push(`/scan/${data.scan_id}`);
+            return;
           }
-          return next;
-        });
-      }, total / 25);
+          if (s.status === "failed") {
+            alert("Scan processing failed. Please try another image.");
+            setUploading(false);
+            return;
+          }
+        } catch {
+          /* transient error — keep polling */
+        }
+        setTimeout(poll, 1200);
+      };
+      poll();
     } catch (err: any) {
       alert(err.message);
       setUploading(false);

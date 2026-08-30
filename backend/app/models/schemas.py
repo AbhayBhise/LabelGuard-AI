@@ -52,10 +52,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class GoogleLoginRequest(BaseModel):
-    google_id_token: str
-
-
 # ---------- Product ----------
 class ProductOut(BaseModel):
     id: UUID

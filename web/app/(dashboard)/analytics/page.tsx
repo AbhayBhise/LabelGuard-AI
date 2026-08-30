@@ -14,10 +14,14 @@ import {
 export default function AnalyticsPage() {
   const [byRule, setByRule] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
+  const [trend, setTrend] = useState<any[]>([]);
 
   useEffect(() => {
     getData("/analytics/violations-by-rule").then(setByRule).catch(() => {});
     getData("/analytics/brand-compliance").then(setBrands).catch(() => {});
+    getData("/analytics/violations-over-time")
+      .then((d) => setTrend(Array.isArray(d) ? d : []))
+      .catch(() => {});
   }, []);
 
   async function getData(path: string) {
@@ -31,15 +35,6 @@ export default function AnalyticsPage() {
     });
     return res.json();
   }
-
-  const trend = [
-    { week: "W1", violations: 42 },
-    { week: "W2", violations: 55 },
-    { week: "W3", violations: 47 },
-    { week: "W4", violations: 61 },
-    { week: "W5", violations: 58 },
-    { week: "W6", violations: 74 },
-  ];
 
   return (
     <div className="space-y-6">
@@ -56,22 +51,31 @@ export default function AnalyticsPage() {
         <div className="rounded-xl border border-slate-200 bg-white p-5">
           <h2 className="mb-4 text-sm font-semibold text-slate-700">
             Violations Over Time
+            <span className="ml-2 font-normal text-slate-400">
+              (last 30 days)
+            </span>
           </h2>
           <div className="h-60">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trend}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="week" />
-                <YAxis />
-                <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="violations"
-                  stroke="#1B4FD8"
-                  strokeWidth={2}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {trend.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                No violations recorded in the last 30 days.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trend}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Line
+                    type="monotone"
+                    dataKey="violations"
+                    stroke="#1B4FD8"
+                    strokeWidth={2}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 

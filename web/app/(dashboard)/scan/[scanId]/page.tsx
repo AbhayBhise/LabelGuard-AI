@@ -10,6 +10,9 @@ import ExtractedFieldsTable from "@/components/ExtractedFieldsTable";
 import { get } from "@/lib/api";
 import { downloadReport } from "@/lib/reports";
 
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/v1";
+
 type ScanResult = {
   scan_id: string;
   overall_status: string | null;
@@ -110,11 +113,21 @@ export default function ScanResultPage() {
           <h2 className="mb-3 text-sm font-semibold text-slate-700">
             Label Image
           </h2>
-          <div className="flex h-64 items-center justify-center rounded-md bg-slate-100 text-sm text-slate-400">
-            {data.annotated_image_url
-              ? "Annotated image"
-              : "Annotated image will appear here"}
-          </div>
+          <img
+            src={`${API_BASE}/scans/${params.scanId}/image?annotated=true`}
+            alt="Scanned label with violation annotations"
+            className="max-h-80 w-full rounded-md bg-slate-100 object-contain"
+            onError={(e) => {
+              const el = e.currentTarget;
+              el.replaceWith(
+                Object.assign(document.createElement("div"), {
+                  className:
+                    "flex h-64 items-center justify-center rounded-md bg-slate-100 text-sm text-slate-400",
+                  textContent: "Label image unavailable",
+                })
+              );
+            }}
+          />
           <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
             <span className="flex items-center gap-1">
               <span className="h-2.5 w-2.5 rounded-full bg-success" /> Compliant

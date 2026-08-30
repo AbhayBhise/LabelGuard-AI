@@ -3,7 +3,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import admin, analytics, auth, products, reports, scans
+from app.routers import (
+    admin,
+    analytics,
+    auth,
+    products,
+    reports,
+    scans,
+    violations,
+)
 
 settings = get_settings()
 
@@ -39,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(reports.router, prefix="/v1")
     app.include_router(analytics.router, prefix="/v1")
     app.include_router(admin.router, prefix="/v1")
+    app.include_router(violations.router, prefix="/v1")
 
     @app.get("/health")
     def health():

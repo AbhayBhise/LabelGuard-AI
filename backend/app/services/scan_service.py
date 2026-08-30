@@ -4,13 +4,19 @@ Coordinates: image preprocessing -> OCR -> VLM -> font detection ->
 compliance check -> persist. Gracefully degrades when ML deps are missing.
 """
 import io
+import re
 from typing import Optional
 
 import numpy as np
 from PIL import Image
 
 from app.services.compliance_engine import ComplianceEngine
-from app.services.datatypes import ExtractedFields, FontMeasurements, ProductMeta
+from app.services.datatypes import (
+    ExtractedFields,
+    FontMeasurements,
+    OCRResult,
+    ProductMeta,
+)
 from app.services.font_detector import FontSizeDetector
 from app.services.image_processor import ImageProcessor
 from app.services.ocr_engine import OCREngine
@@ -48,10 +54,10 @@ class ScanService:
         fields = ExtractedFields.from_dict(merged)
 
         # 4. Font detection
-        px_per_mm = self.font_detector.compute_px_per_mm(array)
-        field_bboxes = self._map_field_bboxes(fields)
+        calibration = self.font_detector.calibrate(array)
+        field_bboxes = self._map_field_bboxes(fields, ocr_result)
         font_measurements = self.font_detector.measure_text_heights(
-            ocr_result, px_per_mm, field_bboxes
+            ocr_result, calibration, field_bboxes
         )
 
         # 5. Compliance
@@ -69,8 +75,6 @@ class ScanService:
     @staticmethod
     def _ocr_to_fields(ocr_text: str) -> dict:
         """Crude extraction of key fields from raw OCR text (fallback)."""
-        import re
-
         text = ocr_text.lower()
         out = {}
 
@@ -100,7 +104,50 @@ class ScanService:
         return out
 
     @staticmethod
-    def _map_field_bboxes(fields: ExtractedFields) -> dict:
-        # Without dedicated per-field OCR grouping we leave bboxes empty;
-        # font measurements then gracefully report no violations.
-        return {}
+    def _map_field_bboxes(fields: ExtractedFields, ocr_result: OCRResult) -> dict:
+        """Locate each extracted field's value among the OCR words and return
+        its union bounding box as ``{x, y, w, h}``.
+
+        This gives the font-size detector real regions to measure and gives the
+        compliance layer coordinates to attach as violation evidence. Fields
+        that cannot be matched to any OCR word are simply omitted.
+        """
+        words = getattr(ocr_result, "words", None) or []
+        if not words:
+            return {}
+
+        def norm(s: str) -> str:
+            return re.sub(r"[^a-z0-9]", "", s.lower())
+
+        indexed = [
+            (norm(w.text), w) for w in words if w.text and w.text.strip()
+        ]
+
+        bboxes: dict = {}
+        for name, value in fields.as_dict().items():
+            if name == "all_text" or not value:
+                continue
+            tokens = {
+                norm(t)
+                for t in re.findall(r"[A-Za-z0-9]+", str(value))
+                if len(t) >= 3
+            }
+            tokens.discard("")
+            if not tokens:
+                continue
+
+            def hits(key: str) -> bool:
+                return any(
+                    key == t or (len(t) >= 3 and (t in key or key in t))
+                    for t in tokens
+                )
+
+            matched = [w for key, w in indexed if key and hits(key)]
+            if not matched:
+                continue
+            x1 = min(w.bbox.x for w in matched)
+            y1 = min(w.bbox.y for w in matched)
+            x2 = max(w.bbox.x + w.bbox.w for w in matched)
+            y2 = max(w.bbox.y + w.bbox.h for w in matched)
+            bboxes[name] = {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1}
+        return bboxes

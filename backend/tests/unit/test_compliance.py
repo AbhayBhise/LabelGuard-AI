@@ -104,6 +104,68 @@ class FontSizeTest(unittest.TestCase):
         self.assertEqual(result.status, "PARTIAL")
 
 
+class MisleadingClaimsTest(unittest.TestCase):
+    def setUp(self):
+        self.engine = ComplianceEngine()
+
+    def test_flags_unsubstantiated_claim(self):
+        fields = ExtractedFields(all_text="Tasty snack. India's No.1 brand!")
+        result = self.engine.check(fields)
+        r26 = [v for v in result.violations if v.rule_id == "R26"]
+        self.assertTrue(r26)
+        self.assertEqual(r26[0].severity, "MAJOR")
+
+    def test_uses_raw_text_when_provided(self):
+        fields = ExtractedFields(all_text="")
+        result = self.engine.check(
+            fields, raw_text="100% natural, clinically proven formula"
+        )
+        labels = {v.found_value.lower() for v in result.violations
+                  if v.rule_id == "R26"}
+        self.assertTrue(labels)
+
+    def test_clean_label_has_no_r26(self):
+        fields = ExtractedFields(all_text="Wheat flour, salt, water.")
+        result = self.engine.check(fields)
+        self.assertEqual(
+            [v for v in result.violations if v.rule_id == "R26"], []
+        )
+
+
+class MRPPositionTest(unittest.TestCase):
+    def setUp(self):
+        self.engine = ComplianceEngine()
+
+    def test_mrp_near_bottom_is_flagged(self):
+        fields = ExtractedFields(mrp="MRP 10 (inclusive of all taxes)")
+        result = self.engine.check(
+            fields,
+            field_bboxes={"mrp": {"x": 5, "y": 950, "w": 40, "h": 10}},
+            image_height=1000,
+        )
+        r65 = [v for v in result.violations if v.rule_id == "R6_5"]
+        self.assertEqual(len(r65), 1)
+        self.assertIsNotNone(r65[0].evidence_bbox)
+
+    def test_mrp_on_panel_is_ok(self):
+        fields = ExtractedFields(mrp="MRP 10 (inclusive of all taxes)")
+        result = self.engine.check(
+            fields,
+            field_bboxes={"mrp": {"x": 5, "y": 200, "w": 40, "h": 10}},
+            image_height=1000,
+        )
+        self.assertEqual(
+            [v for v in result.violations if v.rule_id == "R6_5"], []
+        )
+
+    def test_no_layout_no_r65(self):
+        fields = ExtractedFields(mrp="MRP 10 (inclusive of all taxes)")
+        result = self.engine.check(fields)
+        self.assertEqual(
+            [v for v in result.violations if v.rule_id == "R6_5"], []
+        )
+
+
 class ScoreTest(unittest.TestCase):
     def test_full_score(self):
         self.assertEqual(compute_compliance_score([]), 1.0)

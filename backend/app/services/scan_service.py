@@ -75,7 +75,15 @@ class ScanService:
         )
 
         # 5. Compliance
-        result = self.compliance.check(fields, font_measurements, product_meta)
+        image_height = float(array.shape[0]) if array.ndim >= 2 else None
+        result = self.compliance.check(
+            fields,
+            font_measurements,
+            product_meta,
+            field_bboxes=field_bboxes,
+            raw_text=ocr_text,
+            image_height=image_height,
+        )
 
         # 6. Attach visual evidence (bounding box) to violations where the
         #    offending field was actually located on the label.

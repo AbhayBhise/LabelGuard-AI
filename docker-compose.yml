@@ -1,0 +1,88 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: labelguard
+      POSTGRES_PASSWORD: labelguard
+      POSTGRES_DB: labelguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labelguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: postgresql://labelguard:labelguard@db:5432/labelguard
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio:9000
+      OCR_WORKER_URL: http://ocr_worker:8001
+      VLM_WORKER_URL: http://vlm_worker:8002
+      LAYOUT_WORKER_URL: http://layout_worker:8003
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  ocr_worker:
+    build:
+      context: ./backend/ml_workers
+      dockerfile: ocr_worker/Dockerfile
+    environment:
+      OCR_WORKER_URL: http://ocr_worker:8001
+    ports:
+      - "8001:8001"
+
+  vlm_worker:
+    build:
+      context: ./backend/ml_workers
+      dockerfile: vlm_worker/Dockerfile
+    environment:
+      VLM_WORKER_URL: http://vlm_worker:8002
+    ports:
+      - "8002:8002"
+
+  layout_worker:
+    build:
+      context: ./backend/ml_workers
+      dockerfile: layout_worker/Dockerfile
+    environment:
+      LAYOUT_WORKER_URL: http://layout_worker:8003
+    ports:
+      - "8003:8003"
+
+volumes:
+  pgdata:
+  miniodata:

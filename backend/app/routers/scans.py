@@ -25,6 +25,41 @@ from app.utils import storage
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scans", tags=["scans"])
 
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
+MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB, matches the upload UI
+
+
+def _validate_image(upload: UploadFile) -> bytes:
+    """Enforce content-type, size and that the bytes are a decodable image."""
+    if upload.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            f"Unsupported image type '{upload.content_type or 'unknown'}'. "
+            "Upload JPEG, PNG or WebP.",
+        )
+    data = upload.file.read()
+    if not data:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Uploaded image is empty"
+        )
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "Image exceeds the 10 MB limit",
+        )
+    try:
+        import io
+
+        from PIL import Image
+
+        Image.open(io.BytesIO(data)).verify()
+    except Exception:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "File could not be read as an image",
+        )
+    return data
+
 
 def _run_pipeline(scan_id: str, image_bytes: bytes, meta: dict):
     """Background task: run ML pipeline and persist results."""
@@ -113,9 +148,9 @@ def create_scan(
     if len(images) > 10:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Max 10 images")
 
-    # Read first image (MVP) and store
-    data = images[0].file.read()
-    raw_url = storage.put_file(data, images[0].content_type or "image/jpeg")
+    # Validate + read first image (MVP) and store
+    data = _validate_image(images[0])
+    raw_url = storage.put_file(data, images[0].content_type)
 
     scan = Scan(
         officer_id=user.id,

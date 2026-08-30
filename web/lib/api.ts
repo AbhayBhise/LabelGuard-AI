@@ -16,6 +16,12 @@ export async function api<T = any>(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+
+  if (res.status === 401 && typeof window !== "undefined") {
+    localStorage.removeItem("access_token");
+    window.location.href = "/login";
+  }
+
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(detail || `Request failed: ${res.status}`);

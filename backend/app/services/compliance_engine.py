@@ -40,6 +40,9 @@ class ComplianceEngine:
         extracted_fields: ExtractedFields,
         font_measurements: Optional[FontMeasurements] = None,
         product_meta: Optional[ProductMeta] = None,
+        field_bboxes: Optional[dict] = None,
+        raw_text: Optional[str] = None,
+        image_height: Optional[float] = None,
     ) -> ComplianceResult:
         product_meta = product_meta or ProductMeta()
         font_measurements = font_measurements or FontMeasurements()
@@ -64,6 +67,13 @@ class ComplianceEngine:
             violations += self._check_font_sizes(
                 font_measurements, product_meta.net_weight_grams
             )
+
+        # Rule 26 — misleading declarations (text-based, always checked).
+        violations += self._check_misleading(fields, raw_text)
+
+        # Rule 6(5) — MRP on the principal display panel (needs field layout).
+        if field_bboxes and image_height:
+            violations += self._check_mrp_position(field_bboxes, image_height)
 
         critical = [v for v in violations if v.severity == "CRITICAL"]
         major = [v for v in violations if v.severity == "MAJOR"]
@@ -342,3 +352,84 @@ class ComplianceEngine:
                     expected_format=f">= {min_height:.1f}mm",
                 ))
         return v
+
+    # ---- Rule 6(5): MRP on the principal display panel ----
+    #: Fraction of the label height below which the MRP is considered
+    #: "buried" rather than prominently on the principal display panel.
+    PDP_BOTTOM_FRACTION = 0.8
+
+    def _check_mrp_position(
+        self, field_bboxes: dict, image_height: float
+    ) -> List[Violation]:
+        box = field_bboxes.get("mrp")
+        if not box or not image_height:
+            return []
+        frac = box.get("y", 0) / image_height
+        if frac <= self.PDP_BOTTOM_FRACTION:
+            return []
+        return [Violation(
+            rule_id="R6_5",
+            rule_title="MRP on Principal Display Panel",
+            violation_type="CONTENT", severity="MAJOR",
+            finding=(
+                f"MRP appears {frac * 100:.0f}% down the label, near the "
+                "bottom edge rather than prominently on the principal "
+                "display panel"
+            ),
+            found_value=f"{frac * 100:.0f}% from top",
+            expected_format=(
+                "MRP within the upper "
+                f"{self.PDP_BOTTOM_FRACTION * 100:.0f}% of the principal "
+                "display panel"
+            ),
+            evidence_bbox=box,
+        )]
+
+    # ---- Rule 26: No misleading / unsubstantiated declarations ----
+    MISLEADING_PATTERNS = [
+        (re.compile(r"100\s*%\s*(natural|organic|pure|herbal|ayurvedic)",
+                    re.IGNORECASE),
+         "unqualified '100%' claim"),
+        (re.compile(r"\b(no\.?\s*1|number\s*one|#\s*1)\b", re.IGNORECASE),
+         "unsubstantiated ranking claim"),
+        (re.compile(r"\bbest\s+in\s+(india|class|the\s+world)\b",
+                    re.IGNORECASE),
+         "unsubstantiated superiority claim"),
+        (re.compile(r"\b(clinically|scientifically|lab)\s+proven\b",
+                    re.IGNORECASE),
+         "unverifiable 'proven' claim"),
+        (re.compile(r"\babsolutely\s+free\b|\b100\s*%\s*free\b",
+                    re.IGNORECASE),
+         "'free' claim without stated eligibility"),
+        (re.compile(r"\bmiracle\b|\bcures?\b|\bguaranteed\s+results?\b",
+                    re.IGNORECASE),
+         "exaggerated efficacy claim"),
+    ]
+
+    def _check_misleading(
+        self, f: ExtractedFields, raw_text: Optional[str] = None
+    ) -> List[Violation]:
+        text = raw_text or f.all_text or ""
+        if not text:
+            return []
+        seen = set()
+        out: List[Violation] = []
+        for rx, label in self.MISLEADING_PATTERNS:
+            m = rx.search(text)
+            if not m or label in seen:
+                continue
+            seen.add(label)
+            out.append(Violation(
+                rule_id="R26",
+                rule_title="No Misleading Declarations",
+                violation_type="CONTENT", severity="MAJOR",
+                finding=(
+                    f"Potentially misleading declaration ({label}): "
+                    f"\"{m.group(0).strip()}\""
+                ),
+                found_value=m.group(0).strip(),
+                expected_format=(
+                    "Claims must be substantiated or removed (Rule 26)"
+                ),
+            ))
+        return out

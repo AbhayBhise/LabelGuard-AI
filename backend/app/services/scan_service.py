@@ -24,6 +24,20 @@ from app.services.vlm_engine import VLMEngine
 
 
 class ScanService:
+    # Rule -> the extracted field(s) whose region is the visual evidence for a
+    # violation of that rule. Used to attach a bounding box the report can draw.
+    RULE_FIELDS = {
+        "R6_1_a": ["manufacturer_name", "manufacturer_address"],
+        "R6_1_b": ["product_name"],
+        "R6_1_c": ["net_quantity"],
+        "R6_1_e": ["manufacture_date"],
+        "R6_1_f": ["mrp"],
+        "R6_1_g": ["consumer_care"],
+        "R6_1_h": ["fssai_license"],
+        "R6_1_i": ["country_of_origin"],
+        "R6_1_j": ["batch_number"],
+    }
+
     def __init__(self):
         self.image_processor = ImageProcessor()
         self.ocr_engine = OCREngine()
@@ -63,6 +77,10 @@ class ScanService:
         # 5. Compliance
         result = self.compliance.check(fields, font_measurements, product_meta)
 
+        # 6. Attach visual evidence (bounding box) to violations where the
+        #    offending field was actually located on the label.
+        self._attach_evidence(result.violations, field_bboxes)
+
         return {
             "fields": fields,
             "ocr_text": ocr_text,
@@ -71,6 +89,27 @@ class ScanService:
             "bboxes": field_bboxes,
             "ocr_available": self.ocr_engine.available,
         }
+
+    @classmethod
+    def _attach_evidence(cls, violations, field_bboxes: dict) -> None:
+        """Set ``evidence_bbox`` on each violation to the region of the field
+        it concerns, when that field was located on the label.
+
+        MISSING violations are left without a box (there is nothing on the
+        label to point at).
+        """
+        if not field_bboxes:
+            return
+        for v in violations:
+            if v.evidence_bbox or v.violation_type == "MISSING":
+                continue
+            candidates = list(cls.RULE_FIELDS.get(v.rule_id, []))
+            if v.rule_id == "R6_2" and v.finding:
+                candidates.insert(0, v.finding.split()[0])
+            for field in candidates:
+                if field in field_bboxes:
+                    v.evidence_bbox = field_bboxes[field]
+                    break
 
     @staticmethod
     def _ocr_to_fields(ocr_text: str) -> dict:

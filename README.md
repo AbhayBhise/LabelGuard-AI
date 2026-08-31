@@ -127,6 +127,29 @@ uvicorn app.main:app --reload --port 8000
 
 API docs at http://localhost:8000/docs
 
+## Render deployment
+
+The repository includes a [Render Blueprint](render.yaml) that provisions the
+API, Next.js web service, PostgreSQL, and a Redis-compatible Key Value instance.
+Uploaded files fall back to the API container's local filesystem when no
+S3-compatible object store is configured; that storage is ephemeral on Render.
+For production evidence retention, configure an external S3-compatible store
+and set the `MINIO_*` variables in the Render dashboard.
+
+1. Push this repository to GitHub, GitLab, or Bitbucket.
+2. In Render, select **New > Blueprint**, connect the repository, and choose
+   `render.yaml`.
+3. Enter values for the optional third-party credentials when prompted. They can
+   be left blank if the corresponding integrations are not in use.
+4. After the first deploy, open `https://labelguard-web.onrender.com`. If you
+   rename either service or add a custom domain, update both
+   `NEXT_PUBLIC_API_URL` and the API's `CORS_ORIGINS` value, then redeploy the
+   web service (the public API URL is embedded at build time).
+
+Render automatically deploys commits from the branch selected while creating
+the Blueprint. Protect that branch in your Git provider and require the
+**Continuous Integration** workflow before merging.
+
 ### 3. Frontend
 
 ```bash

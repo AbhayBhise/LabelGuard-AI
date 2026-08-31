@@ -3,7 +3,8 @@
 Computes pixel-per-mm ratio via barcode module width (ISO 15416 ~0.33mm
 module), then measures OCR bounding box heights against LM Rule 6(2) minimums.
 """
-from typing import Optional
+from dataclasses import dataclass
+from typing import Optional, Union
 
 import numpy as np
 
@@ -13,13 +14,39 @@ from app.services.datatypes import FontMeasurements, OCRResult
 BARCODE_MODULE_WIDTH_MM = 0.33  # ISO 15416 standard minimum
 
 
+@dataclass
+class Calibration:
+    """Result of trying to establish a pixel-per-mm scale for an image.
+
+    ``reliable`` is only True when the scale came from a detected barcode; a
+    heuristic fallback is exposed for display but must not drive violations.
+    """
+
+    px_per_mm: Optional[float] = None
+    source: str = "none"  # "barcode" | "heuristic" | "none"
+    reliable: bool = False
+
+
 class FontSizeDetector:
-    def compute_px_per_mm(self, image: np.ndarray) -> Optional[float]:
-        """Try barcode-based calibration, else a document proportion fallback."""
+    def calibrate(self, image: np.ndarray) -> Calibration:
+        """Establish a pixel-per-mm scale, preferring barcode calibration."""
         module_width_px = self._barcode_module_width_px(image)
         if module_width_px:
-            return module_width_px / BARCODE_MODULE_WIDTH_MM
-        return self._document_proportion_px_per_mm(image)
+            return Calibration(
+                px_per_mm=module_width_px / BARCODE_MODULE_WIDTH_MM,
+                source="barcode",
+                reliable=True,
+            )
+        heuristic = self._document_proportion_px_per_mm(image)
+        if heuristic:
+            return Calibration(
+                px_per_mm=heuristic, source="heuristic", reliable=False
+            )
+        return Calibration()
+
+    def compute_px_per_mm(self, image: np.ndarray) -> Optional[float]:
+        """Backwards-compatible scalar accessor (used by the layout worker)."""
+        return self.calibrate(image).px_per_mm
 
     def _barcode_module_width_px(self, image: np.ndarray) -> Optional[float]:
         try:
@@ -76,12 +103,24 @@ class FontSizeDetector:
     def measure_text_heights(
         self,
         ocr_result: OCRResult,
-        px_per_mm: Optional[float],
+        calibration: Union[Calibration, float, None],
         field_bboxes: dict,
     ) -> FontMeasurements:
-        """Compute per-field font heights in mm from OCR words."""
-        fm = FontMeasurements(px_per_mm=px_per_mm, measured=px_per_mm is not None)
-        if not px_per_mm or px_per_mm <= 0:
+        """Compute per-field font heights in mm from OCR words.
+
+        ``calibration`` may be a :class:`Calibration` or a bare px/mm float
+        (legacy callers). Per-field heights are only filled when the scale is
+        reliable, so a heuristic fallback never produces a Rule 6(2) violation.
+        """
+        if isinstance(calibration, Calibration):
+            px_per_mm = calibration.px_per_mm
+            reliable = calibration.reliable
+        else:
+            px_per_mm = calibration
+            reliable = px_per_mm is not None
+
+        fm = FontMeasurements(px_per_mm=px_per_mm, measured=reliable)
+        if not reliable or not px_per_mm or px_per_mm <= 0:
             return fm
 
         for field, bbox in field_bboxes.items():

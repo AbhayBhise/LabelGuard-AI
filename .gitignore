@@ -5,9 +5,19 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.local
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# ---- Local databases ----
+*.db
+*.sqlite3
+backend/labelguard.db
+
+# ---- Runtime storage (local object-store fallback) ----
+backend/storage/*
+!backend/storage/.gitkeep
 
 # ---- Node / Next.js ----
 node_modules/
